@@ -33,14 +33,32 @@ int main(int MainArgc, char *MainArgv[]){
 
 void interactive_mode(){
 	_Bool running = 1;
+	char *line = NULL;
+	size_t len = 0;
 
-	printf("witsshell>\n");
 	while (running){
+		printf("witsshell>");
+		fflush(stdout);
 		
+		if (getline(&line, &len, stdin) != -1){
+			//printf("The input from the user is: %swith length: %ld\n", line, len);
+
+			// Remove trailing whitespace
+			line[strcspn(line, "\n")] = 0;
+		} 
+		else{ 
+			exit(0); 
+		}
 	}
 }
 
 void batch_mode(){
+	_Bool running =1;
+	FILE *input_steam = NULL;
+
+	while (running){
+
+	}
 
 }
 
