@@ -7,15 +7,31 @@
 #include <assert.h>
 #include <fcntl.h>
 
+char** paths = NULL;
+int num_paths = 0;
+
 void interactive_mode();
 void batch_mode(char* file_name);
 void handle_line_input(char* input);
 void print_error();
 void clean_user_input(char* input);
-char ** get_arguments(char* input, int* num_args);
+char** get_arguments(char* input, int* num_args);
+void execute_command(char** arguments, int num_args);
 
 int main(int MainArgc, char *MainArgv[]){
 	
+	// Initialise paths to just bin
+	paths = malloc(2 * sizeof(char*));
+	if(paths == NULL){
+		print_error();
+		exit(1);
+	}
+
+	num_paths = 1;
+	paths[0] = strdup("/bin");
+	paths[1] = NULL;
+	
+
 	if (MainArgc == 1){
 		// Running in interactive mode
 		interactive_mode();
@@ -25,7 +41,7 @@ int main(int MainArgc, char *MainArgv[]){
 		batch_mode(MainArgv[1]);
 	}
 	else{
-		// Too many args throw an error
+		// Too many args 
 		print_error();
 		return 1;
 	}
@@ -83,17 +99,60 @@ void handle_line_input(char* input){
 	char** arguments = get_arguments(input, &num_args);
 
 	if(num_args > 0){
+		// Exit instruction
 		if (strcmp(arguments[0], "exit") == 0){
 			if(num_args == 1){
 				free(arguments);
+				
+				// free paths
+				for(int i = 0; i < num_paths; i++){
+					free(paths[i]);
+				}	
+				free(paths);
+
 				exit(0);
 			}
 			else{
 				print_error();
 			}
 		}
+		// cd .... instruction
+		else if (strcmp(arguments[0], "cd") == 0){
+			if(num_args == 2){
+				if(chdir(arguments[1]) != 0){
+					print_error(); // chdir failed
+				}
+			}
+			else{
+				print_error(); // incorrect number of arguments for cd
+			}
+		}
+		// path ... instruction
+		else if(strcmp(arguments[0], "path") == 0){
+			for(int i = 0;  i < num_paths; i++){
+				free(paths[i]);
+			}
+			free(paths);
 
-		// Path stuff will be handled here
+			// new path list:
+			num_paths = num_args - 1; // -1 for "path"
+			paths = malloc((num_paths + 1) * 2 * sizeof(char*));
+			if(paths == NULL){
+				print_error();
+				exit(1);
+			}
+
+			// copy new paths
+			for(int i = 0; i < num_paths; i++){
+				paths[i] = strdup(arguments[i+1]);
+			}
+			paths[num_paths] = NULL; // null terminator	
+		}
+		else{
+			execute_command(arguments, num_args);
+		}
+
+
 	}
 	else{
 		free(arguments);
@@ -163,6 +222,44 @@ char** get_arguments(char* line, int* num_args){
 	arguments[argument_counter] = NULL;
 	*num_args = argument_counter;
 	return arguments;
+}
+
+void execute_command(char** arguments, int num_args){
+	char* instruction = arguments[0];
+	char constructed_path[2048];
+	bool found = false;
+
+	for(int i = 0; i < num_paths; i++){
+		snprintf(constructed_path, sizeof(constructed_path), "%s/%s", paths[i], instruction);
+	
+		// Check if file exits and if we can execute
+		if(access(constructed_path, X_OK) == 0){
+			found = true;
+			break;
+		}
+	}
+
+	if(!found){
+		print_error();
+		return;
+	}
+
+	pid_t id = fork();
+	if (id < 0){
+		print_error();
+		return;
+	}
+	else if(id == 0){
+		execv(constructed_path, arguments);
+
+		// if exec returns then we have an error
+		print_error();
+		_exit(1); // _exit for child process
+	}
+	else{
+		int status;
+		waitpid(id, &status, 0);
+	}
 }
 
 void print_error(){
