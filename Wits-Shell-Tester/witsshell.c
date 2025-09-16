@@ -12,6 +12,7 @@ void batch_mode(char* file_name);
 void handle_line_input(char* input);
 void print_error();
 void clean_user_input(char* input);
+char ** get_arguments(char* input, int* num_args);
 
 int main(int MainArgc, char *MainArgv[]){
 	
@@ -56,12 +57,20 @@ void interactive_mode(){
 }
 
 void batch_mode(char* file_name){
-	_Bool running =1;
-	FILE *input_steam = NULL;
-
-	while (running){
-
+	FILE *file = fopen(file_name, "r");
+	if (file == NULL){
+		print_error();
+		exit(1);
 	}
+
+	char *line = NULL;
+	size_t len = 0;
+
+	while (getline(&line, &len, file) != -1){
+		handle_line_input(line);
+	}
+	free(line);
+	fclose(file);
 
 }
 
@@ -69,6 +78,29 @@ void handle_line_input(char* input){
 	// remove whitespace and newline
 	clean_user_input(input);
 		
+	// Get list of arguments
+	int num_args = 0;
+	char** arguments = get_arguments(input, &num_args);
+
+	if(num_args > 0){
+		if (strcmp(arguments[0], "exit") == 0){
+			if(num_args == 1){
+				free(arguments);
+				exit(0);
+			}
+			else{
+				print_error();
+			}
+		}
+
+		// Path stuff will be handled here
+	}
+	else{
+		free(arguments);
+		return;
+	}
+
+	free(arguments);
 }
 
 // Clean user input by removing newline and white spaces
@@ -94,6 +126,43 @@ void clean_user_input(char* input){
 	input[trimmed_length] = '\0'; // update null terminating character to new sting length
 
 	//printf("Line after processing: [%s]\n", input);
+}
+
+char** get_arguments(char* line, int* num_args){
+	int max_arg_num = 10;
+	char ** arguments = malloc(max_arg_num * sizeof(char*));
+
+	// doubt this will ever happen - maybe remove this
+	if (arguments == NULL){
+		print_error();
+		exit(1);
+	}
+
+	int argument_counter = 0;
+	char* argument = strtok(line, " \t"); // maybe change delim to just " " -> noone would separate args by a tab
+
+	while (argument != NULL){
+
+		arguments[argument_counter] = argument;
+		argument_counter ++;
+
+		if(max_arg_num <= argument_counter){
+			// we allocated too little space, increase the memory size for the arguments
+			max_arg_num *= 2;	
+			arguments = realloc(arguments, max_arg_num * sizeof(char*));
+
+			// doubt this will ever happen, maybe remove this
+			if (arguments == NULL){
+				print_error();
+				exit(1);
+			}
+		}
+		argument = strtok(NULL, " \t");
+	}
+
+	arguments[argument_counter] = NULL;
+	*num_args = argument_counter;
+	return arguments;
 }
 
 void print_error(){
