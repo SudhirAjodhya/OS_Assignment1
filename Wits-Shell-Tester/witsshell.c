@@ -16,7 +16,8 @@ void handle_line_input(char* input);
 void print_error();
 void clean_user_input(char* input);
 char** get_arguments(char* input, int* num_args);
-void execute_command(char** arguments, int num_args);
+void execute_command(char** arguments, int num_args, char* redirection_file);
+void process_command(char* commands);
 
 int main(int MainArgc, char *MainArgv[]){
 	
@@ -50,7 +51,7 @@ int main(int MainArgc, char *MainArgv[]){
 }
 
 void interactive_mode(){
-	_Bool running = 1;
+	bool running = 1;
 	char *line = NULL;
 	size_t len = 0;
 
@@ -91,81 +92,121 @@ void batch_mode(char* file_name){
 }
 
 void handle_line_input(char* input){
-	// remove whitespace and newline
-	clean_user_input(input);
-		
-	// Get list of arguments
-	int num_args = 0;
-	char** arguments = get_arguments(input, &num_args);
+    char* input_copy = strdup(input);
+    clean_user_input(input_copy);
 
-	if(num_args > 0){
-		// Exit instruction
-		if (strcmp(arguments[0], "exit") == 0){
-			if(num_args == 1){
-				free(arguments);
-				
-				// free paths
-				for(int i = 0; i < num_paths; i++){
-					free(paths[i]);
-				}	
-				free(paths);
+    if(strlen(input_copy) == 0){
+        free(input_copy);
+        return;
+    }
 
-				exit(0);
-			}
+    char* temp_input = strdup(input_copy);
+    int num_args = 0;
+    char** arguments = get_arguments(temp_input, &num_args);
+
+    if (num_args > 0){
+		// Exit 
+        if (strcmp(arguments[0], "exit") == 0){
+            if (num_args == 1) {
+                free(arguments);
+                free(temp_input);
+                free(input_copy);
+
+                for (int i= 0; i < num_paths; i++){
+					free(paths[i]);	
+				} 
+                free(paths);
+                exit(0);
+            } 
 			else{
 				print_error();
-			}
-		}
-		// cd .... instruction
-		else if (strcmp(arguments[0], "cd") == 0){
-			if(num_args == 2){
-				if(chdir(arguments[1]) != 0){
-					print_error(); // chdir failed
+            }
+
+            free(arguments);
+            free(temp_input);
+            free(input_copy);
+            return;
+        } 
+		// CD
+		else if(strcmp(arguments[0], "cd") == 0){
+            if (num_args == 2){
+				if (chdir(arguments[1]) != 0){
+					print_error();
 				}
-			}
+            } 
 			else{
-				print_error(); // incorrect number of arguments for cd
-			}
-		}
-		// path ... instruction
+                print_error();
+            }
+
+            free(arguments);
+            free(temp_input);
+            free(input_copy);
+            return;
+        } 
+		// PATH
 		else if(strcmp(arguments[0], "path") == 0){
-			for(int i = 0;  i < num_paths; i++){
+            for (int i = 0; i < num_paths; i++){
 				free(paths[i]);
 			}
-			free(paths);
-
-			// new path list:
-			num_paths = num_args - 1; // -1 for "path"
-			paths = malloc((num_paths + 1) * 2 * sizeof(char*));
-			if(paths == NULL){
-				print_error();
-				exit(1);
-			}
-
-			// copy new paths
-			for(int i = 0; i < num_paths; i++){
-				paths[i] = strdup(arguments[i+1]);
-			}
-			paths[num_paths] = NULL; // null terminator	
-		}
-		else{
-			execute_command(arguments, num_args);
-		}
+            free(paths);
 
 
-	}
-	else{
-		free(arguments);
-		return;
-	}
+            num_paths = num_args - 1;
+            paths = malloc((num_paths + 1) * sizeof(char*));
 
-	free(arguments);
+            for (int i = 0; i < num_paths; i++){
+				paths[i] = strdup(arguments[i + 1]);	
+			} 
+
+            paths[num_paths] = NULL;
+            
+            free(arguments);
+            free(temp_input);
+            free(input_copy);
+            return;
+        }
+    }
+    free(arguments);
+    free(temp_input);
+
+
+	// Parallel processing
+    char* commands[128];
+    int num_commands = 0;
+    char* command = strtok(input_copy, "&");
+    while (command != NULL){
+        commands[num_commands++] = command;
+        command = strtok(NULL, "&");
+    }
+
+    pid_t ids[num_commands];
+    for (int i = 0; i < num_commands; i++){
+		
+        pid_t id = fork();
+        if (id < 0) {
+            print_error();
+            exit(1);
+        } 
+		else if (id == 0){ 
+            process_command(commands[i]);
+            exit(0); 
+        }
+		else{ 
+            ids[i] = id;
+        }
+    }
+
+	// wait for children to complete
+    for (int i = 0; i < num_commands; i++){
+        waitpid(ids[i], NULL, 0);
+    }
+    
+    free(input_copy);
 }
 
-// Clean user input by removing newline and white spaces
 void clean_user_input(char* input){
 	// remove new line
-	input[strcspn(input, "\n")] = 0;
+	input[strcspn(input, "\n")] = 0; 
 	//printf("Line before processing: [%s]\n", input);
 
 	// Remove leading whitespace 
@@ -206,7 +247,7 @@ char** get_arguments(char* line, int* num_args){
 		argument_counter ++;
 
 		if(max_arg_num <= argument_counter){
-			// we allocated too little space, increase the memory size for the arguments
+			// allocated too little space, increase the memory size for the arguments
 			max_arg_num *= 2;	
 			arguments = realloc(arguments, max_arg_num * sizeof(char*));
 
@@ -224,7 +265,7 @@ char** get_arguments(char* line, int* num_args){
 	return arguments;
 }
 
-void execute_command(char** arguments, int num_args){
+void execute_command(char** arguments, int num_args, char* redirection_file){
 	char* instruction = arguments[0];
 	char constructed_path[2048];
 	bool found = false;
@@ -244,22 +285,60 @@ void execute_command(char** arguments, int num_args){
 		return;
 	}
 
-	pid_t id = fork();
-	if (id < 0){
-		print_error();
+	if(redirection_file != NULL){
+		int file = open(redirection_file, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+
+		if(file == -1){
+			print_error();
+			_exit(1);
+		}
+		dup2(file, STDOUT_FILENO);
+		dup2(file, STDERR_FILENO);
+		close(file);
+	}
+	execv(constructed_path, arguments);
+	print_error();
+	_exit(1);
+}
+
+void process_command(char* commands){
+	char* redirection_file = NULL;
+	char* redirection_symbol = strchr(commands, '>');
+
+	if(redirection_symbol != NULL){
+		*redirection_symbol = '\0';
+		char* file = redirection_symbol + 1;
+
+		while(*file == ' ' || *file == '\t'){
+			file ++;	
+		} 
+
+		char* end = file + strlen(file) - 1;
+		while (end > file && (*end == ' ' || *end == '\t')){
+			end --;
+		}
+
+		*(end + 1) = '\0';
+
+		if(strlen(file) == 0 || strchr(file, ' ') || strchr(file, '\t') || strchr(file, '>')){
+			print_error();
+			return;
+		}
+		redirection_file = file;
+	}
+
+	int num_args = 0;
+	char** arguments = get_arguments(commands, &num_args);
+	if(num_args == 0 ){
+		if(redirection_symbol != NULL){
+			print_error();
+		}
+		free(arguments);
 		return;
 	}
-	else if(id == 0){
-		execv(constructed_path, arguments);
 
-		// if exec returns then we have an error
-		print_error();
-		_exit(1); // _exit for child process
-	}
-	else{
-		int status;
-		waitpid(id, &status, 0);
-	}
+	execute_command(arguments, num_args, redirection_file);
+	free(arguments);
 }
 
 void print_error(){
